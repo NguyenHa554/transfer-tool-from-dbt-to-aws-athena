@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SQL Transfer · dbt to Athena</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/" aria-label="SQL Transfer home"><span class="logo">⇄</span> SQL Transfer</a><span class="local"><i></i> LOCAL · NO AI</span></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">DBT → AWS ATHENA</p><h1>Your SQL, ready for the next engine.</h1><p>Paste a dbt query. Resolve its tables and translate Spark syntax for Athena Engine 3.</p></div><span class="engine">DEV <span>/</span> TRINO</span></section>
+    <form id="convert-form">
+      <div class="settings">
+        <label>ETL date<input type="text" id="etl-date" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" placeholder="yyyymmdd" title="Enter 8 digits: yyyymmdd, for example 20260701" autocomplete="off"><small>yyyymmdd · Blank uses the project value, if defined.</small></label>
+        <label>Incremental context<select id="mode"><option value="">Choose when required</option><option value="full_refresh">Full refresh · is_incremental = false</option><option value="incremental">Incremental · is_incremental = true</option></select><small>Required only for conditional incremental SQL.</small></label>
+        <details><summary>Additional variables <span>JSON</span></summary><label class="sr-only" for="variables">Additional variables JSON</label><textarea id="variables" rows="4" spellcheck="false" placeholder='{"t24_dm_dt": "2026-09-30"}'>{}</textarea><small>User variables override project values.</small></details>
+      </div>
+      <div class="workspace">
+        <section class="editor-panel"><div class="panel-header"><h2><span class="dot source"></span> dbt SQL</h2><button type="button" class="text-button" id="clear">Clear</button></div><label class="sr-only" for="input">dbt SQL input</label><textarea id="input" spellcheck="false" placeholder="Paste your SELECT / WITH query here…&#10;&#10;SELECT *&#10;FROM {{ ref('km_stg_tdh_sds_cl_repay_mapping_key') }}&#10;WHERE sym_run_date = DATE '{{ var(&quot;etl_date&quot;) }}'"></textarea><div class="editor-footer"><span id="input-size">0 characters</span><span>Spark SQL + Jinja</span></div></section>
+        <section class="editor-panel"><div class="panel-header"><h2><span class="dot target"></span> <span id="output-title">Athena SQL</span></h2><div class="actions"><button type="button" class="text-button" id="copy" disabled>Copy</button><button type="button" class="text-button" id="download" disabled>Download SQL</button></div></div><label class="sr-only" for="output">Converted Athena SQL output</label><textarea id="output" readonly spellcheck="false" placeholder="Your converted query will appear here."></textarea><div class="editor-footer"><span id="result-status" role="status">Waiting for input</span><span id="output-engine">Athena Engine 3</span></div></section>
+      </div>
+      <div class="toolbar"><span id="feedback" aria-live="polite">SQL stays on this computer.</span><button id="convert" class="primary" type="submit">Convert SQL <span>→</span></button></div>
+    </form>
+    <div id="report" hidden>
+      <section class="report-panel"><div class="panel-header"><h2>Table mapping</h2><span id="mapping-count" class="badge"></span></div><div class="table-scroll"><table><thead><tr><th>dbt reference</th><th>Athena relation</th><th>Resolution</th><th>Evidence</th></tr></thead><tbody id="mapping-body"></tbody></table></div></section>
+      <div class="report-grid"><section class="report-panel"><h2>Conversion notes</h2><ul id="notes"></ul><h3>Resolved variables</h3><div id="resolved-vars"></div></section><section class="report-panel"><h2>Warnings &amp; errors</h2><ul id="errors" class="errors"></ul><ul id="warnings" class="warnings"></ul></section></div>
+    </div>
+    <footer><span id="repo-status">Loading repository metadata…</span><span>Syntax conversion ≠ execution verification</span></footer>
+  </main>
+</body>
+</html>
