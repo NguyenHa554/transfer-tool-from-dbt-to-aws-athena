@@ -10,10 +10,10 @@
 <body>
   <header><a class="brand" href="/" aria-label="SQL Transfer home"><span class="logo">⇄</span> SQL Transfer</a><span class="local"><i></i> LOCAL · NO AI</span></header>
   <main>
-    <section class="intro"><div><p class="eyebrow">DBT → AWS ATHENA</p><h1>Your SQL, ready for the next engine.</h1><p>Paste a dbt query. Resolve its tables and translate Spark syntax for Athena Engine 3.</p></div><span class="engine">DEV <span>/</span> TRINO</span></section>
+    <section class="intro"><div><p class="eyebrow">DBT → AWS ATHENA</p><h1>Your SQL, ready for the next engine.</h1><p>Paste a dbt query or a model name. Resolve tables and translate Spark syntax for Athena Engine 3.</p></div><span class="engine">DEV <span>/</span> TRINO</span></section>
     <form id="convert-form">
       <div class="settings">
-        <label>ETL date<input type="text" id="etl-date" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" placeholder="yyyymmdd" title="Enter 8 digits: yyyymmdd, for example 20260701" autocomplete="off"><small>yyyymmdd · Blank uses the project value, if defined.</small></label>
+        <label>ETL date<input type="text" id="etl-date" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" placeholder="20260701" title="Enter 8 digits: yyyymmdd. Default: 20260701" autocomplete="off"><small>yyyymmdd · Blank defaults to 20260701. Also used for ds_dt unless supplied separately.</small></label>
         <label>Incremental context<select id="mode"><option value="">Choose when required</option><option value="full_refresh">Full refresh · is_incremental = false</option><option value="incremental">Incremental · is_incremental = true</option></select><small>Required only for conditional incremental SQL.</small></label>
         <details><summary>Additional variables <span>JSON</span></summary><label class="sr-only" for="variables">Additional variables JSON</label><textarea id="variables" rows="4" spellcheck="false" placeholder='{"t24_dm_dt": "2026-09-30"}'>{}</textarea><small>User variables override project values.</small></details>
       </div>

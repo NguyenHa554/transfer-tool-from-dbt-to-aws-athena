@@ -49,6 +49,29 @@ class ConverterTests(unittest.TestCase):
         result = self.convert("{{ config(pre_hook=adapter.run_query('x'), alias='unused') }} SELECT 1")
         self.assertEqual(result['status'], 'converted', result['errors'])
 
+    def test_bare_model_names_use_existing_ref_resolution(self):
+        for name in ('brz_customer', 'lnd_key', 'stg_customer'):
+            with self.subTest(name=name):
+                lookup = self.convert(f'  {name};  ')
+                query = self.convert("SELECT * FROM {{ ref('" + name + "') }}")
+                self.assertEqual(lookup['status'], 'converted', lookup['errors'])
+                self.assertEqual(lookup['output_kind'], 'relation')
+                self.assertEqual(lookup['sql'], query['mappings'][0]['table'])
+                self.assertEqual(lookup['mappings'][0]['reference'], name)
+                self.assertNotIn('SELECT', lookup['sql'])
+                self.assertIn('SELECT', query['sql'])
+
+    def test_unknown_bare_model_does_not_guess_relation(self):
+        result = self.convert('unknown_model')
+        self.assertEqual(result['status'], 'blocked')
+        self.assertEqual(result['mappings'][0]['status'], 'Unknown')
+
+    def test_query_with_raw_table_name_unchanged(self):
+        result = self.convert('SELECT * FROM brz_customer')
+        self.assertEqual(result['status'], 'converted', result['errors'])
+        self.assertIn('FROM brz_customer', result['sql'])
+        self.assertEqual(result['mappings'], [])
+
     def test_bronze_suffix_once(self):
         result = self.convert("SELECT * FROM {{ ref('brz_invoice_tdh_sds') }} UNION ALL SELECT * FROM {{ ref('brz_invoice_tdh_sds_1d') }}")
         self.assertEqual(result['status'], 'converted', result['errors'])
@@ -70,8 +93,28 @@ class ConverterTests(unittest.TestCase):
         self.assertIn('2026-08-01', result['sql'])
         self.assertIn('2026-06-01', result['sql'])
         result = self.convert("SELECT '{{ var('etl_date', '2025-01-01') }}'")
-        self.assertIn('2025-01-01', result['sql'])
+        self.assertIn('2026-07-01', result['sql'])
         self.assertEqual(self.convert("SELECT '{{ var('missing') }}'")['status'], 'blocked')
+
+    def test_default_business_dates_override_project_values(self):
+        self.write('dbt/dbt_project.yml', "name: sample\nvars:\n  etl_date: '2026-07-31'\n  ds_dt: '2026-07-31'\n  t24_dm_dt: '2026-09-30'\n")
+        result = self.convert("SELECT DATE '{{ var('etl_date') }}', DATE '{{ var('ds_dt') }}', DATE '{{ var('t24_dm_dt') }}'", etl_date='')
+        self.assertEqual(result['status'], 'converted', result['errors'])
+        self.assertEqual(result['sql'].count('2026-07-01'), 2)
+        self.assertNotIn('2026-07-31', result['sql'])
+        self.assertIn('2026-09-30', result['sql'])
+        self.assertTrue(all(v['origin'] == 'Application default (20260701)' for v in result['variables'] if v['name'] in ('etl_date', 'ds_dt')))
+
+    def test_supplied_dates_and_independent_ds_dt(self):
+        sql = "SELECT '{{ var('etl_date') }}', '{{ var('ds_dt') }}'"
+        result = self.convert(sql, etl_date='20260815')
+        self.assertEqual(result['sql'].count('2026-08-15'), 2)
+        result = self.convert(sql, variables={'etl_date':'20260815', 'ds_dt':'20260901'})
+        self.assertIn('2026-08-15', result['sql'])
+        self.assertIn('2026-09-01', result['sql'])
+        result = self.convert(sql, etl_date='20260702', variables={'etl_date':'20260815', 'ds_dt':'20260901'})
+        self.assertIn('2026-07-02', result['sql'])
+        self.assertIn('2026-09-01', result['sql'])
 
     def test_incremental_explicit_choice(self):
         sql = "SELECT * FROM {{ ref('stg_customer') }} {% if is_incremental() %} WHERE id>10 {% else %} WHERE id>0 {% endif %}"
@@ -224,6 +267,17 @@ class ConverterTests(unittest.TestCase):
 
 
 class RealRepoTests(unittest.TestCase):
+    def test_bare_account_model_name_matches_ref(self):
+        repo = Path(__file__).resolve().parent.parent / 'km-etl-newcore'
+        if not repo.exists():
+            self.skipTest('Read-only reference repo unavailable')
+        converter = Converter(repo)
+        lookup = converter.convert({'sql': 'brz_tdh_sds_account_snp'})
+        query = converter.convert({'sql': "SELECT * FROM {{ ref('brz_tdh_sds_account_snp') }}"})
+        self.assertEqual(lookup['status'], 'converted', lookup['errors'])
+        self.assertEqual(lookup['sql'], 'dev_bronze.tdh_sds_1d_account_snp')
+        self.assertEqual(lookup['sql'], query['mappings'][0]['table'])
+
     def test_trs_invoice_blocked_macro_retains_normalized_types(self):
         repo = Path(__file__).resolve().parent.parent / 'km-etl-newcore'
         model = repo / 'dbt/models/km_staging/trs/km_stg_trs_cl_invoice.sql'

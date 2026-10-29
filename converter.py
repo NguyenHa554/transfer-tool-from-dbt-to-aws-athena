@@ -16,6 +16,7 @@ from sqlglot.dialects.trino import Trino
 from sqlglot.dialects.spark import Spark
 
 SCHEMAS = {'bronze': 'dev_bronze', 'brz': 'dev_bronze', 'landing': 'dev_lnd', 'lnd': 'dev_lnd', 'km_staging': 'dev_km_stg', 'staging': 'dev_km_stg', 'stg': 'dev_km_stg'}
+DEFAULT_ETL_DATE = '2026-07-01'
 CONFIG = re.compile(r'\{\{\s*config\s*\(.*?\)\s*\}\}', re.S)
 MACRO = re.compile(r'\{%[-+]?\s*macro\s+([A-Za-z_]\w*)\s*\(.*?\{%[-+]?\s*endmacro\s*[-+]?%\}', re.S)
 
@@ -157,12 +158,23 @@ class Converter:
             raise ValueError('Unknown incremental mode.')
         variables = dict(variables)
         if request.get('etl_date'):
+            variables['etl_date'] = request['etl_date']
+        for name in ('etl_date', 'ds_dt'):
+            value = variables.get(name)
+            if value is None or value == '':
+                variables.pop(name, None)
+                continue
             from datetime import date
             try:
-                date.fromisoformat(request['etl_date'])
+                if not isinstance(value, str) or not re.fullmatch(r'\d{8}|\d{4}-\d{2}-\d{2}', value):
+                    raise ValueError('Unsupported date format')
+                variables[name] = date.fromisoformat(value).isoformat()
             except (TypeError, ValueError):
-                raise ValueError('etl_date must use YYYY-MM-DD.') from None
-            variables['etl_date'] = request['etl_date']
+                raise ValueError(f'{name} must be a valid date in YYYYMMDD or YYYY-MM-DD format.') from None
+        date_defaults = {
+            'etl_date': (DEFAULT_ETL_DATE, 'Application default (20260701)'),
+            'ds_dt': (variables.get('etl_date', DEFAULT_ETL_DATE), 'ETL date' if 'etl_date' in variables else 'Application default (20260701)'),
+        }
         self.metadata.refresh()
         meta = self.metadata
         errors, warnings, mappings, notes = [], list(meta.notices), [], []
@@ -177,6 +189,8 @@ class Converter:
                 raise ValueError(f'Circular variable definition: {name}')
             if name in variables:
                 value, origin = variables[name], 'User input'
+            elif name in date_defaults:
+                value, origin = date_defaults[name]
             elif default is not missing:
                 value, origin = default, 'var() default'
             elif name in meta.project.get('vars', {}):
@@ -301,6 +315,19 @@ class Converter:
             raise ValueError(str(message))
 
         env.globals.update(var=var, ref=ref, source=source, target=target, config=lambda *a, **k: '', is_incremental=incremental, execute=False, **{'return': dbt_return}, exceptions=SimpleNamespace(raise_compiler_error=fail))
+        # Add a name-only lookup without changing the existing SQL/ref pipeline.
+        bare_name = re.fullmatch(r'([A-Za-z_]\w*)\s*;?', sql.strip())
+        if bare_name and ('_' in bare_name[1] or bare_name[1] in meta.models):
+            name = bare_name[1]
+            resolved = ref(name)
+            for mapping in mappings:
+                if mapping['reference'] == f'ref({name!r})':
+                    mapping['reference'] = name
+            notes.append('Model-name lookup uses the same alias/schema resolver as ref(); the result is a relation name, not a SELECT query.')
+            warnings.append('Athena/Glue table existence and column types have not been verified.')
+            if any(mapping['status'] == 'Rule-based' for mapping in mappings):
+                warnings.append('Rule-based relation names require confirmation against your Athena catalog.')
+            return {'status': 'blocked' if errors else 'converted', 'output_kind': 'relation', 'sql': resolved, 'mappings': mappings, 'variables': list(used.values()), 'notes': notes, 'warnings': warnings, 'errors': list(dict.fromkeys(errors)), 'metadata': self.summary()}
         # Lazy macro wrappers resolve only macros actually invoked by this query.
         def macro_wrapper(name):
             def call(*args, **kwargs):

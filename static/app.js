@@ -32,10 +32,11 @@ $('convert-form').addEventListener('submit', async event => {
     if (!response.ok) throw new Error(data.error || 'Conversion request failed.');
     result = data;
     $('output').value = data.sql;
-    $('output-title').textContent = data.status === 'converted' ? 'Athena SQL' : 'SQL draft · not executable';
-    $('output-engine').textContent = data.status === 'converted' ? 'Athena Engine 3' : 'Incomplete conversion';
+    const relationOnly = data.output_kind === 'relation';
+    $('output-title').textContent = data.status === 'converted' ? (relationOnly ? 'Athena table' : 'Athena SQL') : 'SQL draft · not executable';
+    $('output-engine').textContent = data.status === 'converted' ? (relationOnly ? 'Athena relation' : 'Athena Engine 3') : 'Incomplete conversion';
     $('report').hidden = false;
-    $('result-status').textContent = data.status === 'converted' ? 'Converted · execution unverified' : 'DRAFT · conversion blocked';
+    $('result-status').textContent = data.status === 'converted' ? (relationOnly ? 'Table resolved · catalog unverified' : 'Converted · execution unverified') : 'DRAFT · conversion blocked';
     $('copy').disabled = $('download').disabled = data.status !== 'converted';
     $('mapping-count').textContent = `${data.mappings.length} relation${data.mappings.length === 1 ? '' : 's'}`;
     $('mapping-body').replaceChildren(...data.mappings.map(mapping => {
@@ -50,7 +51,7 @@ $('convert-form').addEventListener('submit', async event => {
       const div = document.createElement('div'); div.className = 'variable'; div.textContent = `${variable.name} = ${JSON.stringify(variable.value)}`;
       const origin = document.createElement('span'); origin.textContent = variable.origin; div.append(origin); return div;
     }));
-    $('feedback').textContent = data.status === 'converted' ? 'Conversion complete. Review mappings before running in Athena.' : 'Resolve the listed errors before using this SQL.';
+    $('feedback').textContent = data.status === 'converted' ? (relationOnly ? 'Table name resolved. Copy it to use in your Athena query.' : 'Conversion complete. Review mappings before running in Athena.') : 'Resolve the listed errors before using this SQL.';
   } catch (error) {
     invalidate();
     $('feedback').textContent = error.message;
@@ -63,13 +64,13 @@ $('convert-form').addEventListener('submit', async event => {
 });
 $('copy').addEventListener('click', async () => {
   if (result?.status !== 'converted') return;
-  try { await navigator.clipboard.writeText(result.sql); $('feedback').textContent = 'Athena SQL copied.'; }
+  try { await navigator.clipboard.writeText(result.sql); $('feedback').textContent = result.output_kind === 'relation' ? 'Athena table name copied.' : 'Athena SQL copied.'; }
   catch { $('output').focus(); $('output').select(); $('feedback').textContent = 'Press Ctrl+C to copy the selected SQL.'; }
 });
 $('download').addEventListener('click', () => {
   if (result?.status !== 'converted') return;
   const url = URL.createObjectURL(new Blob([result.sql + '\n'], {type:'text/plain;charset=utf-8'}));
-  const link = document.createElement('a'); link.href = url; link.download = 'athena_query.sql'; link.click();
+  const link = document.createElement('a'); link.href = url; link.download = result.output_kind === 'relation' ? 'athena_table.txt' : 'athena_query.sql'; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 $('clear').addEventListener('click', () => {

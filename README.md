@@ -23,10 +23,16 @@ Set-Location -LiteralPath 'C:\nguyen\Projects\VIB2\transfer tool'
 
 ### Sử dụng giao diện
 
-1. Nhập **ETL date** dạng `yyyymmdd`, ví dụ `20260701`. Bỏ trống để dùng
-   giá trị trong project, nếu có. Ngày trong SQL được chuẩn hóa thành `2026-07-01`.
+1. Nhập **ETL date** dạng `yyyymmdd`, ví dụ `20260701`. Bỏ trống mặc định dùng
+   **20260701**, kể cả project khai báo ngày khác. Ngày trong SQL được chuẩn hóa
+   thành `2026-07-01`. Biến `ds_dt` dùng cùng ngày này nếu bạn không truyền riêng
+   trong **Additional variables**; các ngày nghiệp vụ khác giữ quy tắc hiện có.
 2. Dán toàn bộ câu dbt SQL vào ô **dbt SQL**. Có thể giữ nguyên `config()`,
    `ref()`, `source()`, `var()` và macro.
+   Bạn cũng có thể chỉ nhập tên model, ví dụ `brz_tdh_sds_account_snp`, rồi nhấn
+   **Convert SQL** để nhận `dev_bronze.tdh_sds_1d_account_snp`. Tra tên dùng cùng
+   alias/schema resolver của `ref()`; kết quả là tên bảng để copy, không phải
+   câu SELECT. Cách xử lý SQL có `FROM {{ ref(...) }}` giữ nguyên.
 3. Nếu SQL có `is_incremental()`, chọn **Full refresh** để dùng nhánh `false`
    hoặc **Incremental** để dùng nhánh `true`.
 4. Nếu cần bổ sung biến, mở **Additional variables** và nhập JSON, ví dụ:
@@ -100,9 +106,15 @@ python -m venv .venv
 4. Click **Convert SQL**. Review relation mappings, resolved variables, notes,
    and warnings. Copy or download `athena_query.sql` when conversion succeeds.
 
-An explicit ETL date overrides `etl_date` in the JSON variables. For other
-variables the precedence is user JSON, the default argument to `var()`, then
-the project declaration. No date is inferred from today's date.
+An explicit ETL date overrides `etl_date` in the JSON variables. If neither is
+supplied, `etl_date` defaults to **20260701** (`2026-07-01` in SQL), overriding
+both project declarations and defaults in `var('etl_date', ...)`. `ds_dt` uses
+the selected/default ETL date unless explicitly supplied in JSON. These two
+date variables accept `YYYYMMDD` or ISO `YYYY-MM-DD` in the API/JSON and are
+normalized to ISO. For other variables the precedence remains user JSON,
+the default argument to `var()`, then the project declaration. Other business
+dates, such as `t24_dm_dt`, are not changed. Resolved variables show whether
+the date came from user input or the application default.
 
 If a variable/macro/reference or SQL construct cannot be resolved reliably,
 the output is marked **DRAFT · conversion blocked**. Copy/download buttons
@@ -193,6 +205,11 @@ not guessed to be Athena relations.
 `GET /api/health` returns the read-only repo path and index counts.
 
 `POST /api/convert` takes:
+
+The `sql` field also accepts a single bare model name. This returns
+`output_kind: "relation"` and the resolved name in `sql`; it does not synthesize
+a SELECT. SQL statements containing raw physical names keep their existing
+behavior; name-only lookup does not rewrite those references.
 
 ```json
 {
