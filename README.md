@@ -182,6 +182,12 @@ not guessed to be Athena relations.
 - Safe `TO_DATE` expressions use `TRY` to preserve null on invalid input.
   Integer casts of known numeric expressions truncate toward zero. Casts of
   columns with unknown source types still require checking against real types.
+- Spark `ADD_MONTHS(start, months)` becomes
+  `DATE_ADD('month', months, CAST(start AS DATE))`. Casting the start to DATE
+  retains Spark's DATE return type for timestamp inputs. Calendar-month
+  arithmetic handles shorter months; negative/zero month offsets, null inputs,
+  dynamic integer offsets and nested calls are retained. Validate source string
+  date formats and timezone-dependent timestamp casts against the real runtime.
 - Pure SQL-producing Jinja macros are rendered from the actual repo definition
   in a strict sandbox. Unknown macros and runtime/database-dependent macros
   block conversion. Unsupported macros are not replaced with invented SQL.

@@ -211,6 +211,41 @@ class ConverterTests(unittest.TestCase):
         self.assertIn('TRUNCATE(-1.9)', result['sql'])
         self.assertIn('DOUBLE', result['sql'])
 
+    def test_add_months_converts_to_calendar_month_date_add(self):
+        cases = [
+            "add_months(DATE '2026-01-31', 1)",
+            "add_months(DATE '2024-01-31', 1)",
+            "add_months(DATE '2026-03-31', -1)",
+            "add_months(DATE '2026-07-01', 0)",
+            'add_months(start_date, months_count)',
+            'add_months(NULL, 1)',
+            'add_months(start_date, NULL)',
+            "add_months(TIMESTAMP '2026-01-31 12:34:56', 1)",
+        ]
+        for expression in cases:
+            with self.subTest(expression=expression):
+                result = self.convert(f'SELECT {expression} AS next_date FROM t')
+                self.assertEqual(result['status'], 'converted', result['errors'])
+                self.assertNotIn('ADD_MONTHS(', result['sql'].upper())
+                converted = sqlglot.parse_one(result['sql'], read='trino').expressions[0].this
+                self.assertIsInstance(converted, exp.DateAdd)
+                self.assertEqual(converted.args['unit'].name.upper(), 'MONTH')
+                self.assertIsInstance(converted.this, exp.Cast)
+                self.assertEqual(converted.this.to.this, exp.DataType.Type.DATE)
+                original = sqlglot.parse_one(f'SELECT {expression}', read='spark').expressions[0]
+                offset = converted.expression
+                # Trino's DATE_ADD generator coerces dynamic offsets to BIGINT.
+                if isinstance(offset, exp.Cast) and offset.to.this == exp.DataType.Type.BIGINT:
+                    offset = offset.this
+                self.assertEqual(offset.sql(), original.expression.sql())
+                self.assertTrue(any('ADD_MONTHS' in note for note in result['notes']))
+
+    def test_nested_add_months_no_unsupported_function_remains(self):
+        result = self.convert("SELECT add_months(add_months(d, 1), -2) AS d2 FROM t WHERE add_months(d, n) > DATE '2026-07-01'")
+        self.assertEqual(result['status'], 'converted', result['errors'])
+        self.assertNotIn('ADD_MONTHS(', result['sql'].upper())
+        self.assertEqual(len(list(sqlglot.parse_one(result['sql'], read='trino').find_all(exp.DateAdd))), 3)
+
     def test_structural_preservation(self):
         sql = "WITH a AS (SELECT id, CASE WHEN x>0 THEN x ELSE NULL END v, ROW_NUMBER() OVER (PARTITION BY id ORDER BY d DESC) rn FROM t WHERE active='Y') SELECT a.id, v FROM a LEFT JOIN u ON a.id=u.id WHERE rn=1 UNION ALL SELECT id, v FROM old"
         result = self.convert(sql)
@@ -303,6 +338,7 @@ class RealRepoTests(unittest.TestCase):
             self.assertTrue(all(row['status'] != 'Unknown' for row in result['mappings']))
             if 'repay' in filename:
                 self.assertIn('DD.DD_KEY = MK.DD_KEY', result['sql'])
+                self.assertNotIn('ADD_MONTHS(', result['sql'].upper())
 
 
 if __name__ == '__main__':

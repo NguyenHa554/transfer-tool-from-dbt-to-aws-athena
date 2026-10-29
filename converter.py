@@ -400,6 +400,15 @@ class Converter:
     @staticmethod
     def _compatible_functions(tree, notes):
         def rewrite(node):
+            if isinstance(node, exp.AddMonths):
+                # Spark ADD_MONTHS returns DATE, even for timestamp input.
+                # Trino DATE_ADD retains its input type, so normalize to DATE.
+                notes.append("ADD_MONTHS(start, months) → DATE_ADD('month', months, CAST(start AS DATE)); retain DATE output and calendar-month arithmetic.")
+                return exp.DateAdd(
+                    this=exp.Cast(this=node.this.copy(), to=exp.DataType.build('DATE')),
+                    expression=node.expression.copy(),
+                    unit=exp.Var(this='MONTH'),
+                )
             if isinstance(node, exp.Cast) and node.to.this in {exp.DataType.Type.INT, exp.DataType.Type.BIGINT, exp.DataType.Type.SMALLINT, exp.DataType.Type.TINYINT}:
                 operand = node.this
                 numeric = isinstance(operand, (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Mod, exp.Neg, exp.Ceil, exp.Floor, exp.Round)) or (isinstance(operand, exp.Literal) and operand.is_number)
