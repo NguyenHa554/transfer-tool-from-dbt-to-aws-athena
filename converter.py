@@ -30,15 +30,32 @@ ATHENA_QUERY_TYPES = {
 }
 
 
+def athena_to_date_sql(generator, expression):
+    """Emit date casts/parsing in Trino syntax, also inside blocked drafts.
+
+    The base Trino generator handles normalized format tokens (%Y%m%d, etc.).
+    Using the draft Spark generator here would emit TO_DATE or Java masks.
+    """
+    date_format = expression.args.get('format')
+    if date_format is not None and not isinstance(date_format, exp.Literal):
+        # A dynamic Java/Spark mask cannot be translated reliably at conversion
+        # time. _audit blocks this case; retain the original two-argument draft.
+        return expression.sql(dialect='spark')
+    sql = expression.sql(dialect='trino', unsupported_level=sqlglot.ErrorLevel.RAISE)
+    return f'TRY({sql})' if expression.args.get('safe') else sql
+
+
 class AthenaQuery(Trino):
     class Generator(Trino.Generator):
         TYPE_MAPPING = {**Trino.Generator.TYPE_MAPPING, **ATHENA_QUERY_TYPES}
+        TRANSFORMS = {**Trino.Generator.TRANSFORMS, exp.TsOrDsToDate: athena_to_date_sql}
 
 
 class AthenaTypeDraft(Spark):
     """Normalize query types while preserving unconverted Spark functions in a draft."""
     class Generator(Spark.Generator):
         TYPE_MAPPING = {**Spark.Generator.TYPE_MAPPING, **ATHENA_QUERY_TYPES}
+        TRANSFORMS = {**Spark.Generator.TRANSFORMS, exp.TsOrDsToDate: athena_to_date_sql}
 
 
 def environment():
@@ -372,6 +389,8 @@ class Converter:
                                 type_changes.append(f'{source_type} → {target_type}')
                     if type_changes:
                         notes.append('Athena query data types: ' + '; '.join(dict.fromkeys(type_changes)) + '. FLOAT → REAL retains 32-bit precision; DOUBLE and DECIMAL precision/scale are unchanged.')
+                    if tree.find(exp.TsOrDsToDate):
+                        notes.append('TO_DATE: emit Trino date casts / DATE_PARSE with translated literal formats, including in drafts. TRY preserves null on invalid date input where Spark parsing is safe.')
                     # A blocked macro/function must not prevent independent type
                     # normalization. This remains a Spark draft until the full
                     # Trino conversion succeeds; no unsupported function is guessed.
@@ -426,9 +445,6 @@ class Converter:
                     condition = exp.Or(this=condition, expression=check)
                 coalesced = exp.Coalesce(this=node.copy(), expressions=[exp.Literal.string('')])
                 return exp.Case(ifs=[exp.If(this=condition, true=exp.Null())], default=coalesced)
-            if isinstance(node, exp.TsOrDsToDate) and node.args.get('safe'):
-                notes.append('TO_DATE: use TRY around date parsing to retain null for invalid dates.')
-                return exp.Anonymous(this='TRY', expressions=[node.copy()])
             if isinstance(node, (exp.Least, exp.Greatest)):
                 # Spark skips null operands; Trino LEAST/GREATEST propagate null.
                 args = [node.this, *node.expressions]
@@ -452,6 +468,10 @@ class Converter:
     @staticmethod
     def _audit(tree, errors):
         for node in tree.walk():
+            if isinstance(node, exp.TsOrDsToDate):
+                date_format = node.args.get('format')
+                if date_format is not None and not isinstance(date_format, exp.Literal):
+                    errors.append('TO_DATE: dynamic Spark date format cannot be translated reliably; supply a literal format such as yyyyMMdd.')
             name = node.sql_name().lower() if isinstance(node, exp.Func) else ''
             if isinstance(node, exp.Anonymous):
                 name = node.name.lower()

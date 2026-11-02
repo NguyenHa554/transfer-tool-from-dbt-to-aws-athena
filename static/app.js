@@ -37,7 +37,9 @@ $('convert-form').addEventListener('submit', async event => {
     $('output-engine').textContent = data.status === 'converted' ? (relationOnly ? 'Athena relation' : 'Athena Engine 3') : 'Incomplete conversion';
     $('report').hidden = false;
     $('result-status').textContent = data.status === 'converted' ? (relationOnly ? 'Table resolved · catalog unverified' : 'Converted · execution unverified') : 'DRAFT · conversion blocked';
-    $('copy').disabled = $('download').disabled = data.status !== 'converted';
+    $('copy').disabled = typeof data.sql !== 'string' || !data.sql.trim();
+    $('copy').textContent = data.status === 'converted' ? 'Copy' : 'Copy draft';
+    $('download').disabled = data.status !== 'converted';
     $('mapping-count').textContent = `${data.mappings.length} relation${data.mappings.length === 1 ? '' : 's'}`;
     $('mapping-body').replaceChildren(...data.mappings.map(mapping => {
       const tr = document.createElement('tr');
@@ -63,9 +65,16 @@ $('convert-form').addEventListener('submit', async event => {
   }
 });
 $('copy').addEventListener('click', async () => {
-  if (result?.status !== 'converted') return;
-  try { await navigator.clipboard.writeText(result.sql); $('feedback').textContent = result.output_kind === 'relation' ? 'Athena table name copied.' : 'Athena SQL copied.'; }
-  catch { $('output').focus(); $('output').select(); $('feedback').textContent = 'Press Ctrl+C to copy the selected SQL.'; }
+  if (busy || !result?.sql?.trim()) return;
+  const draft = result.status !== 'converted';
+  try {
+    await navigator.clipboard.writeText(result.sql);
+    $('feedback').textContent = draft ? 'Draft copied. Conversion is incomplete; resolve the listed errors before running in Athena.' : (result.output_kind === 'relation' ? 'Athena table name copied.' : 'Athena SQL copied.');
+  }
+  catch {
+    $('output').focus(); $('output').select();
+    $('feedback').textContent = draft ? 'Press Ctrl+C to copy this draft. Conversion is incomplete; resolve its errors before running in Athena.' : 'Press Ctrl+C to copy the selected SQL.';
+  }
 });
 $('download').addEventListener('click', () => {
   if (result?.status !== 'converted') return;
@@ -76,6 +85,7 @@ $('download').addEventListener('click', () => {
 $('clear').addEventListener('click', () => {
   $('input').value = ''; $('output').value = ''; $('report').hidden = true;
   $('output-title').textContent = 'Athena SQL'; $('output-engine').textContent = 'Athena Engine 3';
+  $('copy').textContent = 'Copy';
   invalidate(); $('input-size').textContent = '0 characters'; $('result-status').textContent = 'Waiting for input';
   $('feedback').textContent = 'SQL stays on this computer.'; $('input').focus();
 });

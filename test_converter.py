@@ -204,6 +204,42 @@ class ConverterTests(unittest.TestCase):
         self.assertIn('ARRAY_MIN', result['sql'])
         self.assertIn('COALESCE(REGEXP_EXTRACT', result['sql'])
 
+    def test_to_date_no_unsupported_single_argument_call(self):
+        expressions = [
+            'to_date(d)',
+            "to_date(d, 'yyyy-MM-dd')",
+            "to_date(d, 'yyyyMMdd')",
+            "to_date(d, 'dd/MM/yyyy')",
+            'to_date(NULL)',
+            "to_date('not-a-date')",
+            "to_date(TIMESTAMP '2026-07-01 12:34:56')",
+        ]
+        for expression in expressions:
+            for blocked in (False, True):
+                with self.subTest(expression=expression, blocked=blocked):
+                    result = self.convert(f'SELECT {expression} AS day' + (', conv(code,16,10) AS key' if blocked else '') + ' FROM t')
+                    self.assertEqual(result['status'], 'blocked' if blocked else 'converted', result['errors'])
+                    self.assertNotRegex(result['sql'], r'(?i)\bTO_DATE\s*\(')
+                    self.assertIn('TRY(', result['sql'])
+                    self.assertIn('AS DATE', result['sql'])
+                    if 'yyyyMMdd' in expression:
+                        self.assertIn("DATE_PARSE(d, '%Y%m%d')", result['sql'])
+                    if 'dd/MM/yyyy' in expression:
+                        self.assertIn("DATE_PARSE(d, '%d/%m/%Y')", result['sql'])
+                    sqlglot.parse_one(result['sql'], read='trino')
+
+    def test_to_date_format_not_double_converted_in_nested_expression(self):
+        result = self.convert("SELECT add_months(to_date(d, 'yyyyMMdd'), 1) FROM t")
+        self.assertEqual(result['status'], 'converted', result['errors'])
+        self.assertNotIn('TO_DATE(', result['sql'].upper())
+        self.assertIn("DATE_PARSE(d, '%Y%m%d')", result['sql'])
+        self.assertIn("DATE_ADD('MONTH'", result['sql'])
+
+    def test_to_date_dynamic_mask_requires_confirmation(self):
+        result = self.convert('SELECT to_date(d, date_format_column) FROM t')
+        self.assertEqual(result['status'], 'blocked')
+        self.assertTrue(any('dynamic Spark date format' in error for error in result['errors']))
+
     def test_integer_rounding_and_division(self):
         result = self.convert('SELECT CAST(1.9 AS INT), CAST(-1.9 AS INT), 1 / 2')
         self.assertEqual(result['status'], 'converted', result['errors'])
@@ -323,6 +359,7 @@ class RealRepoTests(unittest.TestCase):
         self.assertNotRegex(result['sql'], r'(?i)\bAS\s+STRING\b')
         self.assertRegex(result['sql'], r'(?i)CAST\(NULL AS VARCHAR\) AS FEE_KEY')
         self.assertRegex(result['sql'], r'(?i)CAST\(NULL AS VARCHAR\) AS FEE_NO')
+        self.assertNotRegex(result['sql'], r'(?i)\bTO_DATE\s*\(')
         self.assertTrue(any('conv' in error.lower() for error in result['errors']))
 
     def test_lending_and_forex_current_sources(self):

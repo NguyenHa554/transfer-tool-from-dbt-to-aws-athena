@@ -47,7 +47,9 @@ Set-Location -LiteralPath 'C:\nguyen\Projects\VIB2\transfer tool'
    dán SQL vào Athena để chạy. Nút **Clear** xóa SQL và kết quả đang hiển thị.
 
 Nếu hiện **DRAFT · conversion blocked**, đọc lỗi và bổ sung thông tin còn thiếu
-trước khi chuyển lại. Công cụ chỉ chuyển đổi SQL, không tự chạy query trên Athena.
+trước khi chuyển lại. Nút **Copy draft** vẫn cho phép sao chép bản nháp để chỉnh
+sửa; cảnh báo chưa chuyển đổi hoàn chỉnh được giữ nguyên. Không chạy bản nháp
+trên Athena trước khi xử lý các lỗi. Công cụ chỉ chuyển đổi SQL, không tự chạy query trên Athena.
 Repo `km-etl-newcore` chỉ được đọc để tra metadata.
 
 ### Tắt ứng dụng và xử lý lỗi mở trang
@@ -117,8 +119,10 @@ dates, such as `t24_dm_dt`, are not changed. Resolved variables show whether
 the date came from user input or the application default.
 
 If a variable/macro/reference or SQL construct cannot be resolved reliably,
-the output is marked **DRAFT · conversion blocked**. Copy/download buttons
-stay disabled. For a successfully parsed query, type names are normalized even
+the output is marked **DRAFT · conversion blocked**. **Copy draft** is enabled
+when the output is non-empty so you can copy it for manual editing; a warning
+remains visible and is repeated after copying. Download stays disabled for
+blocked results. For a successfully parsed query, type names are normalized even
 when another conversion step is blocked. Unsupported Spark functions or
 unresolved Jinja can still remain, so the panel is labelled **SQL draft · not
 executable**, not Athena SQL. Do not run this draft in Athena.
@@ -180,6 +184,13 @@ not guessed to be Athena relations.
 - `REGEXP_EXTRACT` preserves Spark's empty-string result on no match.
   `LEAST`/`GREATEST` preserve Spark's handling of null operands.
 - Safe `TO_DATE` expressions use `TRY` to preserve null on invalid input.
+  Both single-argument `TO_DATE(x)` and literal-format calls are emitted as
+  Trino casts / `DATE_PARSE`, including in blocked drafts; Spark's one-argument
+  `TO_DATE` is never passed through to Athena. For example,
+  `TO_DATE(x, 'yyyyMMdd')` becomes `TRY(CAST(DATE_PARSE(x, '%Y%m%d') AS DATE))`.
+  Dynamic format columns are blocked because Spark/Java masks cannot be
+  translated reliably without their values. A draft may still contain other
+  unsupported functions and must not be executed before resolving its errors.
   Integer casts of known numeric expressions truncate toward zero. Casts of
   columns with unknown source types still require checking against real types.
 - Spark `ADD_MONTHS(start, months)` becomes
